@@ -179,11 +179,19 @@ ggsave("figures/GsL_Map.png",
 
 ```{r 2.0 - smaller scale map with bonus satelite land data (~100 km x 100 km or less) }
 
+# this map is designed for smaller spatial scales, and requires the input of points as a csv. Here it is refered to as sta, or stations. If you don't have stations you can instead just add a point as we did in the code chunk above. 
+
+#latlong###################################################
+#latitude <- 47.966535
+#longitude <- -63.703253
+####################################################
+#sta<-as.data.frame(cbind(latitude,longitude))
+
 # Import objects 
-sta<-read.csv("data/oceanographic_stations.csv")
-predator_transect_lines<-st_read("data/Survey_Transect_Lines.shp")
-Wolves_grid_cells<-st_read("data/Rotated_Wolves_Oceanographic_Grid_Cells.shp")
-GMB_grid_cells<-st_read("data/Rotated_GMB_Oceanographic_Grid_Cells.shp")
+sta<-read.csv("data/oceanographic_stations.csv") # this is points or stations 
+predator_transect_lines<-st_read("data/Survey_Transect_Lines.shp") #shapefile as an example
+Wolves_grid_cells<-st_read("data/Rotated_Wolves_Oceanographic_Grid_Cells.shp") #shapefile as an example
+GMB_grid_cells<-st_read("data/Rotated_GMB_Oceanographic_Grid_Cells.shp") #shapefile as an example
 all_grid_cells <- rbind(Wolves_grid_cells,GMB_grid_cells)
 
 # Load world data with rnaturalearth
