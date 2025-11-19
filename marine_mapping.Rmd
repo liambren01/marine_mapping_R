@@ -1,0 +1,363 @@
+---
+title: "marine_mapping"
+author: "Liam Brennan"
+date: "2025-11-19"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+#line that sets your working directory back to project directory
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+```{r install packages}
+library(tidyverse)
+library(geosphere)
+library(ggmap)
+library(sf)
+library(terra)
+library(osmdata)
+library(ggspatial)
+library(cowplot)
+library(raster)
+library(tidyterra)
+library(lubridate)
+library(rstudioapi)
+library(sp)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(marmap)
+library(metR)
+library(lubridate)
+library(maps)
+library(rnaturalearthhires)
+
+```
+
+```{r 1.0 Quick start for code for large scale marine mapping ~100km x 100km or larger }
+#add the desired center of your map here
+#latlong###################################################
+latitude <- 47.966535
+longitude <- -63.703253
+####################################################
+
+sta<-as.data.frame(cbind(latitude,longitude))
+
+# UTM finder function
+lonlat2UTM <- function(lonlat) {
+  utm <- (floor((lonlat[1] + 180) / 6) %% 60) + 1
+  if (lonlat[2] > 0) {
+    utm + 32600
+  } else {
+    utm + 32700
+  }
+}
+
+crs.utm <- lonlat2UTM(c(longitude, latitude))
+
+# Convert stations data to sf object with WGS84 CRS
+sta.wgs <- st_as_sf(sta, coords = c("longitude", "latitude"), crs = 4326)
+
+# Transform the stations data to UTM
+sta.utm <- st_transform(sta.wgs, crs = crs.utm)
+
+#buffer#################################################
+tmp <- st_buffer(sta.utm, dist = 400000) #buffer distance, adjust this depending on the scale of the map you would like (in metres)
+##################################################
+
+# Load world data with rnaturalearth
+world <- ne_countries(scale = "large", returnclass = "sf")
+
+# Filter for Canada and USA
+reg <- world %>% 
+       dplyr::filter(admin %in% c("Canada", "United States of America"))
+
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Get the bounding box coordinates
+aoi.utm <- st_bbox(tmp)
+aoi.wgs <- st_bbox(st_transform(tmp, crs = 4326))
+
+# Map background of the location
+map_bounds <- c(aoi.wgs["xmin"], aoi.wgs["ymin"], aoi.wgs["xmax"], aoi.wgs["ymax"])
+
+#Get Canada map data with administrative boundaries
+
+CAN_maritimes <- ne_states(country = "Canada", returnclass = "sf") %>% 
+  st_transform(crs = 3347)
+
+#can add an inset if you like
+inset <- ggplot() + 
+  geom_sf(data = CAN_maritimes , fill = "white", colour = "black") +
+  geom_sf(data = st_as_sfc(aoi.utm, crs = st_crs(sta.utm)), color = "red", fill = NA, lwd = 1) +
+  coord_sf(crs = st_crs(3347)) +
+  theme_void()
+  
+
+#bathy################################################################################
+# get bathymetry data - you can adjust the resolution within reason, the code will fail if the file becomes too big
+
+b = getNOAA.bathy(lon1 = map_bounds["xmin"], lon2 = map_bounds["xmax"], lat1 = map_bounds["ymin"], lat2 = map_bounds["ymax"], 
+                  resolution = 1)
+
+#plot################################################################################
+bf_ocean <- fortify.bathy(b) %>% 
+            filter(z<(0)) %>% 
+            mutate(z_invert = z*-1, longitude = x, latitude = y)
+
+bf = fortify.bathy(b) %>% 
+     mutate(z_invert = z*-1)
+
+
+sta_map <- ggplot() +
+  
+  coord_sf(crs = 4326, datum = sf::st_crs(4326)) +
+  
+  geom_raster(data = bf_ocean, aes(x = x, y = y, fill = z_invert), alpha = 1) +
+
+  # Define the reversed color scale for bathymetry
+  scale_fill_gradientn(
+    name = "Depth (m)",
+    colors = c(
+      "#162b64", # Midnight Blue
+      "#235591", # Deep Sea Blue
+      "#3386c0", # Ocean Blue
+      "#6bbce5", # Sky Blue
+      "#9fdbe8", # Soft Blue-Green
+      "#ccecfb"  # Shallow Aqua
+    ),
+    values = scales::rescale(c(min(bf_ocean$z), 0, max(bf_ocean$z))),
+    na.value = "transparent",
+    trans = 'reverse'
+    
+  ) + 
+  
+  # Add contours for bathymetry with specified breaks
+  geom_contour(data = bf, 
+               aes(x = x, y = y, z = z_invert),
+               breaks = c(50, 100, 150, 200),
+               size = 0.2,
+               colour = "#61829f") +
+  
+  # add coastline
+  geom_sf(data = reg, fill = "#61829f", color = "white") +
+  
+  # Set map extent
+  coord_sf(xlim = c(map_bounds["xmin"] + 0.5, map_bounds["xmax"] - 0.5), 
+           ylim = c(map_bounds["ymin"] + 0.5, map_bounds["ymax"] - 0.5)) +
+  
+  annotation_north_arrow(location = "topleft") +
+  
+  annotation_scale(location = "bl", width_hint = 0.3) +
+
+  labs(
+    x = "Longitude",
+    y = "Latitude")
+
+
+# Print the main map
+print(sta_map)
+
+#insetmap#####
+sta_map_inset <- ggdraw() +
+  draw_plot(sta_map, x = 0, y = 0, scale = 1) +
+  draw_plot(inset, x = 0.75, y = 0.71, width = 0.28, height = 0.28)
+
+#####################
+# Print the inset map
+
+print(sta_map_inset)
+
+dir.create("figures")
+
+# Save the map
+ggsave("figures/GsL_Map.png",
+       plot = sta_map_inset,
+       height = 4, width = 6, dpi = 300)
+
+```
+
+```{r 2.0 - smaller scale map with bonus satelite land data (~100 km x 100 km or less) }
+
+# Import objects 
+sta<-read.csv("data/oceanographic_stations.csv")
+predator_transect_lines<-st_read("data/Survey_Transect_Lines.shp")
+Wolves_grid_cells<-st_read("data/Rotated_Wolves_Oceanographic_Grid_Cells.shp")
+GMB_grid_cells<-st_read("data/Rotated_GMB_Oceanographic_Grid_Cells.shp")
+all_grid_cells <- rbind(Wolves_grid_cells,GMB_grid_cells)
+
+# Load world data with rnaturalearth
+world <- ne_countries(scale = "large", returnclass = "sf")
+
+# Filter for Canada and USA
+reg <- world %>% 
+       dplyr::filter(admin %in% c("Canada", "United States of America"))
+
+mlong <- mean(sta$longitude)
+mlat <- mean(sta$latitude)
+
+# UTM finder function
+lonlat2UTM <- function(lonlat) {
+  utm <- (floor((lonlat[1] + 180) / 6) %% 60) + 1
+  if (lonlat[2] > 0) {
+    utm + 32600
+  } else {
+    utm + 32700
+  }
+}
+
+crs.utm <- lonlat2UTM(c(mlong, mlat))
+
+# Convert stations data to sf object with WGS84 CRS
+sta.wgs <- st_as_sf(sta, coords = c("longitude", "latitude"), crs = 4326)
+
+# Transform the stations data to UTM
+sta.utm <- st_transform(sta.wgs, crs = crs.utm)
+
+# Buffer these points by 30km to create an area of interest (AOI)
+tmp <- st_buffer(sta.utm, dist = 30000)
+
+# Get the bounding box coordinates
+aoi.utm <- st_bbox(tmp)
+aoi.wgs <- st_bbox(st_transform(tmp, crs = 4326))
+
+# Map background of the location
+map_bounds <- c(aoi.wgs["xmin"], aoi.wgs["ymin"], aoi.wgs["xmax"], aoi.wgs["ymax"])
+
+#Get Canada map data with administrative boundaries
+
+canada <- ne_states(country = "Canada", returnclass = "sf")
+
+maine<- ne_states(country = "United States of America", returnclass = "sf") %>% 
+        filter (name == "Maine")
+  
+# Filter to get only New Brunswick and Nova Scotia and PEI
+mapNBNS<- filter(canada, name %in% c("New Brunswick","Nova Scotia","Prince Edward Island"))
+
+mapNSNBMaine <- rbind(mapNBNS,maine)
+
+
+inset <- ggplot() +
+  geom_rect(aes(xmin = -72, xmax = -59, ymin = 42.5, ymax = 49), 
+             fill = "white", color = "black", size = 0.4, alpha = 0.5) + # 
+  geom_sf(data = mapNSNBMaine, fill = "white", colour = "black") +
+  geom_sf(data = st_as_sfc(aoi.utm, crs = st_crs(sta.utm)), color = "red", fill = NA, lwd = 1) +
+  geom_text(data = data.frame(
+    region = c("Maine", "Nova\nScotia", "New\nBrunswick"),
+    lon = c(-69.3, -60.5, -66.3),  # Approximate longitudes
+    lat = c(45.2, 44.6, 46.6)      # Approximate latitudes
+  ),
+  aes(x = lon, y = lat, label = region), size = 2.5, color = "black") +
+  #Adjust the coordinates based on your inset map
+  theme_void()
+
+# get bathymetry data
+b = getNOAA.bathy(lon1 = map_bounds["xmin"], lon2 = map_bounds["xmax"], lat1 = map_bounds["ymin"], lat2 = map_bounds["ymax"], 
+                  resolution = 0.001)
+
+bf = fortify.bathy(b) %>% 
+     mutate(z_invert = z*-1)
+
+bf_ocean <- fortify.bathy(b) %>% 
+            filter(z<(0)) %>% 
+            mutate(z_invert = z*-1)
+
+labels_df <- data.frame(
+  long = c(-66.56, -66.40),
+  lat = c(44.85, 44.60),
+  label = c("Wolves Islands", "Grand Manan Basin")
+)
+
+#Bonus Satellite land data through Google maps API ######################################################
+
+#Bonus tip
+
+ #MUST register own personal API Key for this bonus script to work
+ #https://developers.google.com/maps/documentation/embed/get-api-key
+ 
+#INPUT YOU API CODE BELOW
+ #register_google(key = "XXXXXXXXXXXXXXXXXXXXXXXXXX")
+ 
+#  Add style elements from Google Maps to make things prettier
+ #style1 <- c(feature = "all", element = "labels", visibility = "off")
+ #style2 <- c("&style=", feature = "landscape.natural.landcover", element = "geometry", saturation = "-48")
+ #style3 <- c("&style=", feature = "landscape.natural.landcover", element = "geometry", lightness = "-15")
+ #style4 <- c("&style=", feature = "administrative", element = "geometry", visibility = "off")
+ #style <- c(style1, style2, style3, style4)
+
+ #land_map <- get_googlemap(
+   #center = c(mlong, mlat), zoom = 9,
+   #maptype = "terrain",  scale = 2,
+   #style = style
+ #)
+
+#######################################################
+
+ sta_map <- ggplot() + #if following the bonus tip above replace this and the next line (geom_sf) of code with "ggmap(land_map) +"
+  
+   # add coastline
+  geom_sf(data = reg, fill = "#61829f", color = "white") +
+   
+  # Add raster of bathymetry (continuous color fill)
+  geom_raster(data = bf_ocean, aes(x = x, y = y, fill = z_invert), alpha = 0.8) +
+  
+  # Define the color scale for bathymetry
+  scale_fill_gradientn(
+    name = "Depth (m)",
+    colors = c("#10145d", "#253494", "#225ea8", "#1d91c0", "#8ad8ec"),
+    values = scales::rescale(c(min(bf_ocean$z), 0, max(bf_ocean$z))),
+    na.value = "transparent",
+    trans = 'reverse'
+  ) +
+   # Add contours for bathymetry with specified breaks
+  geom_contour(data = bf, 
+               aes(x = x, y = y, z = z_invert),
+               breaks = c(50, 100, 150, 200),
+               size = 0.2,
+               colour = "lightgrey") +
+  
+  geom_sf(data = all_grid_cells,inherit.aes = FALSE, aes(color = "Sampling grid"), alpha = 0.1 ) +
+  
+  geom_sf(data = predator_transect_lines,inherit.aes = FALSE, aes(color = "Survey transect"), alpha = 0.6 ) +
+  # Mapping the color aesthetic for Stations
+  geom_sf(data = sta.wgs, inherit.aes = FALSE, shape = 17, size = 2.5, aes(color = "Oceanographic \nstations")) +
+  
+  # Define the legend with specific colors for each species and stations
+  scale_color_manual(name = "Map Features", 
+                     values = c("Oceanographic \nstations" = "black","Survey transect" = "black", "Sampling Grid" = "white")) + # Add more species
+
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  
+  geom_text(data = labels_df, aes(x = long, y = lat, label = label), 
+            size = 5, color = "black",fontface = "bold") +
+  
+  theme(
+    axis.line = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    axis.ticks = element_blank(),
+    legend.title = element_text(size = 15),
+    legend.text = element_text(size = 15)
+  ) +
+  
+  annotation_north_arrow(location = "topleft") +
+  
+  # Set map extent
+  coord_sf(xlim = c(map_bounds["xmin"]+0.1, map_bounds["xmax"]-0.1), 
+           ylim = c(map_bounds["ymin"]+0.1, map_bounds["ymax"]-0.1 ))
+
+##### Inset Map #####
+sta_map_inset <- ggdraw() +
+  draw_plot(sta_map, x = 0, y = 0) +
+  draw_plot(inset, x = 0.38, y = 0.70, width = 0.28, height = 0.28)
+
+# Print and save the map
+print(sta_map_inset)
+
+dir.create("figures")
+
+ggsave("figures/BOF_sampling_map.png",
+       plot = sta_map_inset,
+       height = 4, width = 6, dpi = 300)
+```
+
