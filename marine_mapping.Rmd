@@ -35,6 +35,10 @@ library(rnaturalearthhires)
 ```
 
 ```{r 1.0 Quick start for code for large scale marine mapping ~100km x 100km or larger }
+
+#this is a quick start map without any point or shapefiles included. I have included just coastlines and bathymetry. See section 2.0 for including more map elements. 
+
+
 #add the desired center of your map here
 #latlong###################################################
 latitude <- 47.966535
@@ -161,7 +165,7 @@ print(sta_map)
 #insetmap#####
 sta_map_inset <- ggdraw() +
   draw_plot(sta_map, x = 0, y = 0, scale = 1) +
-  draw_plot(inset, x = 0.75, y = 0.71, width = 0.28, height = 0.28)
+  draw_plot(inset, x = 0.735, y = 0.71, width = 0.24, height = 0.24)
 
 #####################
 # Print the inset map
@@ -179,7 +183,8 @@ ggsave("figures/GsL_Map.png",
 
 ```{r 2.0 - smaller scale map with bonus satelite land data (~100 km x 100 km or less) }
 
-# this map is designed for smaller spatial scales, and requires the input of points as a csv. Here it is refered to as sta, or stations. If you don't have stations you can instead just add a point as we did in the code chunk above. 
+# this map is designed for smaller spatial scales, and included more map elements. 
+#this code requires the input of points as a csv. Here it is called  sta, (or stations). If you don't have stations you can instead just add a point as we did in the code chunk above. 
 
 #latlong###################################################
 #latitude <- 47.966535
@@ -276,9 +281,7 @@ labels_df <- data.frame(
   label = c("Wolves Islands", "Grand Manan Basin")
 )
 
-#Bonus Satellite land data through Google maps API ######################################################
-
-#Bonus tip
+#Bonus satellite land data through Google maps API ######################################################
 
  #MUST register own personal API Key for this bonus script to work
  #https://developers.google.com/maps/documentation/embed/get-api-key
@@ -357,7 +360,7 @@ labels_df <- data.frame(
 ##### Inset Map #####
 sta_map_inset <- ggdraw() +
   draw_plot(sta_map, x = 0, y = 0) +
-  draw_plot(inset, x = 0.38, y = 0.70, width = 0.28, height = 0.28)
+  draw_plot(inset, x = 0.35, y = 0.70, width = 0.28, height = 0.28)
 
 # Print and save the map
 print(sta_map_inset)
